@@ -13,6 +13,8 @@ library(tensorflow)
 library(readr)
 library(lubridate)
 library(tfhub)
+library(dplyr)
+library(rpart)
 
 
 ######### DATA LOADING AND PROCESSING ##########
@@ -101,7 +103,7 @@ sona$year <- str_sub(sona$filename, start = 1, end = 4)
 sona$pres <- str_remove_all(str_extract(sona$filename, "[dA-Z].*\\."), "\\.")
 
 # clean the sona dataset by adding the date and removing unnecessary text
-replace_reg <- '(http.*?(\\s|.$))|(www.*?(\\s|.$))|&amp;|&lt;|&gt;|\n'
+replace_reg <- '(http.*?(\\s|.$))|(www.*?(\\s|.$))|&amp;|&lt;|&gt;|\n%[0-9]'
 
 sona <-sona %>%
   mutate(speech = lemmatize_strings(stringr::str_replace_all(speech, replace_reg , ' '))
@@ -129,8 +131,16 @@ tidy_sona <- sona %>%
   unnest_tokens(sentences, speech, token = 'sentences') %>%   # tokenize
   dplyr::select(sentences, pres, date, filename,year)
 
+#tokenize into words 
+tidy_sona.w <- sona %>% 
+  mutate(speech = str_replace_all(speech, replace_reg, '')) %>% # remove links etx
+  unnest_tokens(word, speech, token = 'regex') %>%   # tokenize
+  dplyr::select(word, pres, date, filename,year)
+
 # removing deKlerk and Motlanthe from the analysis as they made only 1 speech
 tidy_sona  <- tidy_sona  %>%
+  filter(!pres %in% c('deKlerk', 'Motlanthe')) # excluding 1 time president
+tidy_sona.w  <- tidy_sona.w  %>%
   filter(!pres %in% c('deKlerk', 'Motlanthe')) # excluding 1 time president
 
 pres_ind <- unique(tidy_sona$pres) # dealing with 4 presidents now
@@ -307,4 +317,37 @@ history2 <- model2 %>%
 
 results2 <- model2 %>% evaluate(x_test.seq, y_test_cat, batch_size = 64, verbose = 2)
 
-####
+#### Bag of words ######
+
+word_bag <- tidy_sona.w %>%
+  group_by(word) %>%
+  count() %>%
+  ungroup() %>%
+  top_n(200, wt = n)
+ 
+sona.w_tdf <- tidy_sona.w %>%
+  inner_join(word_bag) %>%
+  group_by(pres,date,word) %>%
+  count() %>%  
+  group_by(pres) %>%
+  mutate(total = sum(n)) %>%
+  ungroup()
+
+bag_of_words <- sona.w_tdf %>% 
+  dplyr::select(pres,word,n) %>% 
+  pivot_wider(names_from = word, values_from = n, values_fill = 0) 
+  
+set.seed(321)
+y_training <- bag_of_words %>% 
+  group_by(pres) %>% 
+  slice_sample(prop = 0.7) %>% 
+  ungroup() %>%
+  dplyr::select(pres)
+
+x_training <- bag_of_words %>% 
+  right_join(y_training, by = 'pres') %>%
+  dplyr::select(-pres)
+
+y_test <- bag_of_words %>% 
+  anti_join(y_training, by = 'pres') %>%
+  dplyr::select(-pres)
