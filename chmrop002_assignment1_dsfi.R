@@ -15,6 +15,8 @@ library(lubridate)
 library(tfhub)
 library(dplyr)
 library(rpart)
+library(caret)
+
 
 
 ######### DATA LOADING AND PROCESSING ##########
@@ -93,7 +95,7 @@ this_speech[32] <- readChar('https://raw.githubusercontent.com/iandurbach/datasc
 this_speech[33] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2020_Ramaphosa.txt', nchars = 47910)
 this_speech[34] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2021_Ramaphosa.txt', nchars = 43352)
 this_speech[35] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2022_Ramaphosa.txt', nchars = 52972)
-this_speech[36] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2022_Ramaphosa.txt', nchars = 52972)
+this_speech[36] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2022_Ramaphosa.txt', nchars = 53933)
 
 
 sona <- data.frame(filename = filenames, speech = this_speech, stringsAsFactors = FALSE)
@@ -135,6 +137,7 @@ tidy_sona <- sona %>%
 tidy_sona.w <- sona %>% 
   mutate(speech = str_replace_all(speech, replace_reg, '')) %>% # remove links etx
   unnest_tokens(word, speech, token = 'regex') %>%   # tokenize
+  filter(!word %in% stop_words$word, str_detect(word, '[A-Za-z]')) %>% #remove stop words
   dplyr::select(word, pres, date, filename,year)
 
 # removing deKlerk and Motlanthe from the analysis as they made only 1 speech
@@ -146,79 +149,42 @@ tidy_sona.w  <- tidy_sona.w  %>%
 pres_ind <- unique(tidy_sona$pres) # dealing with 4 presidents now
 
 set.seed(123)
-
-########SEPARATE PRESIDENT SENTENCES#########
-mandela_sentences <- filter(tidy_sona,pres == pres_ind[1])
-mbeki_sentences <- filter(tidy_sona,pres == pres_ind[2])
-zuma_sentences <- filter(tidy_sona,pres == pres_ind[3])
-ramaphosa_sentences <- filter(tidy_sona,pres == pres_ind[4])
-
+###### NN and CNN #########
 
 ########SPLIT DATA INTO TRAINING AND TESTING #########
-splt <- function(name){
-  #separate sentences into 67% and 33% for each president
-  ind <- sample(1:2, nrow(name), replace= TRUE, prob=c(0.70,0.30))
-  
-  # Split features
-  train <- name[ind==1, ]
-  test <- name[ind==2, ]
-  return(list(train=train,test=test))
-}
 
-#split speeches into 67/33 for each pres
-mandela_train <- splt(mandela_sentences)[[1]]
-mandela_test <- splt(mandela_sentences)[[2]]
+#splitting sentences into testing and training  
+sent_train<- tidy_sona %>%
+  group_by("pres") %>%
+  slice_sample(prop=0.7)%>%
+  ungroup()%>%
+  dplyr::select(pres,date,sentences)
 
-mbeki_train <- splt(mbeki_sentences)[[1]]
-mbeki_test <- splt(mbeki_sentences)[[2]]
-
-zuma_train <- splt(zuma_sentences)[[1]]
-zuma_test <- splt(zuma_sentences)[[2]]
-
-ramaphosa_train <- splt(ramaphosa_sentences)[[1]]
-ramaphosa_test <- splt(ramaphosa_sentences)[[2]]
-
-
-#joining the speeches together
-rand <- sample((dim(ramaphosa_train)[1]+dim(zuma_train)[1]+dim(mbeki_train)[1]+dim(mandela_train)[1]),replace = F)
-sona_train <- rbind(mandela_train,mbeki_train,zuma_train,ramaphosa_train)
-sona_train_rn <- sona_train[rand,] #randomised train dataset 
-
-rand1 <- sample((dim(ramaphosa_test)[1]+dim(zuma_test)[1]+dim(mbeki_test)[1]+dim(mandela_test)[1]),replace = F)
-sona_test <- rbind(mandela_test,mbeki_test,zuma_test,ramaphosa_test)
-sona_test_rn <- sona_test[rand1,] #randomised test data set
+sent_test <- tidy_sona %>%
+  anti_join(sent_train)%>%
+  dplyr::select(pres,date,sentences)
 
 #separate features into y and x variables
-x_train <- sona_train_rn[1]
-y_train <- sona_train_rn[2]
+x_train <- sent_train[3]
+y_train <- sent_train[1]
 
-x_test <- sona_test_rn[1]
-y_test <- sona_test_rn[2]
+x_test <- sent_test[3]
+y_test <- sent_test[1]
 
 ####CONVERT TARGET INTO CAT ##########
 
-tag.to.num <- function(y){
-  y_train_num <- c()
-  for (i in 1:nrow(y)){
-    if (y[i,]== "Ramaphosa"){
-      y_train_num[i]<-0
-    }else
-      if (y[i,]== "Zuma"){
-        y_train_num[i]<-1
-      }else
-        if (y[i,]== "Mbeki"){
-          y_train_num[i]<-2
-        }else
-          if (y[i,]== "Mandela"){
-            y_train_num[i]<-3
-          }
-  }
-  return(y_train_num)
-}
+# Create the mapping
+mapping <- c("Ramaphosa" = 0, "Mandela" = 1, "Zuma" = 2, "Mbeki" = 3)
 
-#convert the numeric classes to categorical variables
-y_train_cat <- to_categorical(tag.to.num(y_train))
-y_test_cat <- to_categorical(tag.to.num(y_test))
+# Apply the mapping to the pres column and convert to categorical. 
+y_train_cat <- y_train %>%
+  mutate(pres = mapping[pres])%>%
+  to_categorical()
+
+y_test_cat <- y_test %>%
+  mutate(pres = mapping[pres])%>%
+  to_categorical()
+
 
 ###### CONVERT SENTENCES INTO SEQUENCE ##### 
 
@@ -229,19 +195,13 @@ sent.to.seq<- function(x,max_features,maxlen){
   
   #convert text to sequence
   x.seq <- texts_to_sequences(tokenizer,x$sentences)
-  
-  #check word index
-  #tokenizer$index_word[x.seq[[1]]]
-  
-  # investigate the max length you want your sequence to be so that you pad with zeros 
-  #hist(unlist(lapply(x.seq, length)), main = "Sequence length after tokenization")
-  
+
   # padding 
   x.seq <- x.seq %>% pad_sequences(maxlen = maxlen) 
   return(x.seq)
 }
 
-max_features <- 1000
+max_features <- 1500
 maxlen <- 70
 x_train.seq <-sent.to.seq(x_train,max_features,maxlen)
 x_test.seq <- sent.to.seq(x_test,max_features,maxlen)
@@ -249,33 +209,37 @@ x_test.seq <- sent.to.seq(x_test,max_features,maxlen)
 
 
 ####### BUILD THE MODEL ######
-
-model <- keras_model_sequential() %>% 
+set.seed(123)
+nn_model <- keras_model_sequential() %>% 
   layer_embedding(max_features, output_dim = 10, input_length = maxlen) %>%
   layer_dropout(0.2) %>%
   layer_flatten() %>%
-  layer_dense(50, activation = "relu") %>%
+  layer_dense(100, activation = "relu") %>%
   layer_dense(4, activation = "softmax")
 
 
-model %>% compile(
+nn_model %>% compile(
   loss = 'categorical_crossentropy',
   optimizer = optimizer_adam(learning_rate = 0.01),
   metrics = c('accuracy'),
 )
 
-history <- model %>% 
+#impliment early stopping 
+early_stopping <- callback_early_stopping(monitor = "val_loss", patience = 10)
+
+nn_history <- nn_model %>% 
   fit(x_train.seq, y_train_cat, 
       epochs = 30, batch_size = 5, 
-      validation_split = 0.2, shuffle = TRUE
+      validation_split = 0.2, shuffle = TRUE,
+      callbacks = list(early_stopping)
   )
 
-results <- model %>% evaluate(x_test.seq, y_test_cat, batch_size = 64, verbose = 2)
+nn_results <- nn_model %>% evaluate(x_test.seq, y_test_cat, batch_size =5, verbose = 2)
 
 
 #### CNN ######
-
-model1 <- keras_model_sequential() %>% 
+set.seed(123)
+cnn_model <- keras_model_sequential() %>% 
   layer_embedding(max_features, output_dim = 10, input_length = maxlen) %>%
   layer_dropout(0.2) %>%
   layer_conv_1d(filters = 64, kernel_size = 8, activation = "relu") %>%
@@ -285,46 +249,32 @@ model1 <- keras_model_sequential() %>%
   layer_dense(4, activation = "softmax")
 
 
-model1 %>% compile(
+cnn_model %>% compile(
   loss = 'categorical_crossentropy',
   optimizer = optimizer_adam(learning_rate = 0.01),
   metrics = c('accuracy'),
 )
 
-history1 <- model1 %>% 
+cnn_history <- cnn_model %>% 
   fit(x_train.seq, y_train_cat, 
       epochs = 30, batch_size = 5, 
-      validation_split = 0.2, shuffle = TRUE
+      validation_split = 0.2, shuffle = TRUE,
+      callbacks = list(early_stopping)
   )
 
-results1 <- model1 %>% evaluate(x_test.seq, y_test_cat, batch_size = 64, verbose = 2)
+cnn_results <- cnn_model %>% evaluate(x_test.seq, y_test_cat, batch_size = 64, verbose = 2)
 
-######## USING TRANSFER LEARNING MODELS ######
-embedding <- "https://tfhub.dev/google/nnlm-en-dim50/2"
-hub_layer <- tfhub::layer_hub(handle = embedding, trainable = TRUE)
-hub_layer(x_train[1,])
 
-model2 <- keras_model_sequential() %>%
-  hub_layer() %>%
-  layer_dense(16, activation = "relu") %>%
-  layer_dense(4, activation = "softmax")
+#### Bag of words per speech ######
 
-history2 <- model2 %>% 
-  fit(x_train.seq, y_train_cat, 
-      epochs = 30, batch_size = 5, 
-      validation_split = 0.2, shuffle = TRUE
-  )
-
-results2 <- model2 %>% evaluate(x_test.seq, y_test_cat, batch_size = 64, verbose = 2)
-
-#### Bag of words ######
-
+# select the top 500 words 
 word_bag <- tidy_sona.w %>%
   group_by(word) %>%
   count() %>%
   ungroup() %>%
-  top_n(200, wt = n)
+  top_n(500, wt = n)
  
+
 sona.w_tdf <- tidy_sona.w %>%
   inner_join(word_bag) %>%
   group_by(pres,date,word) %>%
@@ -332,22 +282,166 @@ sona.w_tdf <- tidy_sona.w %>%
   group_by(pres) %>%
   mutate(total = sum(n)) %>%
   ungroup()
-
+# show words in a wide format
 bag_of_words <- sona.w_tdf %>% 
-  dplyr::select(pres,word,n) %>% 
+  dplyr::select(pres,date,word,n) %>% 
   pivot_wider(names_from = word, values_from = n, values_fill = 0) 
   
 set.seed(321)
-y_training <- bag_of_words %>% 
+word_train <- bag_of_words %>% 
   group_by(pres) %>% 
   slice_sample(prop = 0.7) %>% 
-  ungroup() %>%
+  ungroup() 
+
+word_test<- bag_of_words %>% 
+  anti_join(training) 
+
+x_train.w<-word_train%>%
+  dplyr::select(-c(date))
+
+y_train.w<-word_train%>%
   dplyr::select(pres)
 
-x_training <- bag_of_words %>% 
-  right_join(y_training, by = 'pres') %>%
-  dplyr::select(-pres)
+x_test.w<-word_test%>%
+  dplyr::select(-c(date,pres))
 
-y_test <- bag_of_words %>% 
-  anti_join(y_training, by = 'pres') %>%
-  dplyr::select(-pres)
+y_test.w <-word_test%>%
+  dplyr::select(pres)
+
+fit <- rpart(pres ~ .,x_train.w, method = 'class')
+# options(repr.plot.width = 12, repr.plot.height = 10) # set plot size in the notebook
+plot(fit, main = 'Full Classification Tree')
+text(fit, use.n = TRUE, all = TRUE, cex=.8)
+
+fittedtrain <- predict(fit, type = 'class')
+predtrain <- table(x_train.w$pres, fittedtrain)
+predtrain
+
+round(sum(diag(predtrain))/sum(predtrain), 3) # training accuracy
+
+
+fit.test<-predict(fit,newdata =x_test.w,type="class" )
+predtrain.t <- table(y_test.w$pres, fit.test)
+predtrain.t
+
+round(sum(diag(predtrain.t))/sum(predtrain.t), 3) # training accuracy
+
+
+#### Bag of words per sentence ######
+#tokenize sentences in words
+tidy_sona.sw <- tidy_sona %>% 
+  mutate (sent_id = row_number())%>% #add sentence id for grouping 
+  unnest_tokens(word, sentences, token = 'regex') %>%   # tokenize
+  filter(!word %in% stop_words$word, str_detect(word, '[A-Za-z]')) %>% #remove stop words
+  dplyr::select(pres,sent_id,word)
+
+
+# select the top 500 words 
+word_bag <- tidy_sona.sw %>%
+  group_by(word) %>%
+  count() %>%
+  ungroup() %>%
+  top_n(9000, wt = n)
+
+
+sona.w_tdf <- tidy_sona.sw %>%
+  inner_join(word_bag) %>%
+  group_by(pres,sent_id,word) %>%
+  count() %>%  
+  group_by(pres) %>%
+  mutate(total = sum(n)) %>%
+  ungroup()
+# show words in a wide format
+bag_of_words <- sona.w_tdf %>% 
+  dplyr::select(pres,sent_id,word,n) %>% 
+  pivot_wider(names_from = word, values_from = n, values_fill = 0) 
+
+set.seed(321)
+word_train <- bag_of_words %>% 
+  group_by(pres) %>% 
+  slice_sample(prop = 0.7) %>% 
+  ungroup() 
+
+word_test<- bag_of_words %>% 
+  anti_join(word_train) 
+
+x_train.w<-word_train%>%
+  dplyr::select(-c(sent_id))
+
+y_train.w<-word_train%>%
+  dplyr::select(pres)
+
+x_test.w<-word_test%>%
+  dplyr::select(-c(sent_id,pres))
+
+y_test.w <-word_test%>%
+  dplyr::select(pres)
+
+fit <- rpart(pres ~ .,x_train.w, method = 'class')
+# options(repr.plot.width = 12, repr.plot.height = 10) # set plot size in the notebook
+plot(fit, main = 'Full Classification Tree')
+text(fit, use.n = TRUE, all = TRUE, cex=.8)
+
+fittedtrain <- predict(fit, type = 'class')
+predtrain <- table(x_train.w$pres, fittedtrain)
+predtrain
+
+round(sum(diag(predtrain))/sum(predtrain), 3) # training accuracy
+
+
+fit.test<-predict(fit,newdata =x_test.w,type="class" )
+predtrain.t <- table(y_test.w$pres, fit.test)
+predtrain.t
+
+round(sum(diag(predtrain.t))/sum(predtrain.t), 3) # training accuracy
+####### 
+
+ndocs <- 36
+
+idf <-  sona.w_tdf%>% 
+  group_by(word) %>% 
+  summarize(docs_with_word = n()) %>% 
+  ungroup() %>%
+  mutate(idf = log(ndocs / docs_with_word)) %>% arrange(desc(idf))
+
+sona_tdf.w <- sona.w_tdf %>% 
+  left_join(idf, by = 'word') %>% 
+  mutate(tf = n/total, tf_idf = tf * idf)
+
+
+tfidf <- sona_tdf.w %>% 
+  dplyr::select(pres,word,tf_idf) %>%  # note the change, using tf-idf
+  pivot_wider(names_from = word, values_from = tf_idf) %>%  
+  left_join(tidy_sona %>% dplyr::select(pres,date))
+########
+tfidf <- sona.w_tdf %>%
+  bind_tf_idf(word,pres,n)
+
+tfidf <- sona_tdf.w %>% 
+  dplyr::select(pres,word,tf_idf) %>%  # note the change, using tf-idf
+  pivot_wider(names_from = word, values_from = tf_idf) %>%  
+  left_join(tidy_sona %>% dplyr::select(pres,date))
+
+training_tidf <- tfidf %>% 
+  group_by(pres) %>% 
+  slice_sample(prop = 0.7) %>% 
+  ungroup() 
+
+test_tidf <- tfidf %>% 
+  anti_join(training_tidf, by = 'pres') 
+########
+
+fit2<- rpart(pres ~ sentences,sona_train_rn)
+
+fittedtrain2 <- predict(fit2, type = 'class')
+predtrain <- table(x_training$pres, fittedtrain)
+predtrain
+
+round(sum(diag(predtrain))/sum(predtrain), 3) # training accuracy
+
+
+fit.test<-predict(fit,newdata =x_testing,type="class" )
+predtrain.t <- table(x_testing$pres, fit.test)
+predtrain.t
+
+round(sum(diag(predtrain.t))/sum(predtrain.t), 3) # training accuracy
