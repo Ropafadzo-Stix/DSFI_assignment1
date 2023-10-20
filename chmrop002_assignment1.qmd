@@ -1,0 +1,505 @@
+---
+author:
+  - name: Ropafadzo Chimuti
+    email: CHMROP002@myuct.ac.za
+title: Model Selection in Text Classification: A Study on Predictive Approaches for President Identification
+keywords: SONA, neural networks ,classification trees, convolutional neural networks ,bag-of-words,nn,cnn
+abstract: |
+  Summary of motivation and outcome. Start with context, task and object, finish with findings and conclusion. This is written last.
+---
+
+```{r libraries, message=FALSE, warning=FALSE, results='hide', echo=FALSE}
+library(stringr)
+library(tidyverse)
+library(tidytext)
+library(textstem)
+library(textdata)
+library(tm)
+library(MASS)
+library(topicmodels)
+library(keras)
+library(tensorflow)
+library(readr)
+library(lubridate)
+library(tfhub)
+library(dplyr)
+library(rpart)
+library(knitr)
+library(caret)
+library(tree)
+```
+
+```{r extract, message=FALSE, warning=FALSE, results='hide', echo=FALSE}
+set.seed(2023)
+
+# read in text data files and organise these into a data frame
+filenames <- c('1994_post_elections_Mandela.txt', 
+               '1994_pre_elections_deKlerk.txt', 
+               '1995_Mandela.txt', 
+               '1996_Mandela.txt', 
+               '1997_Mandela.txt',
+               '1998_Mandela.txt', 
+               '1999_post_elections_Mandela.txt', 
+               '1999_pre_elections_Mandela.txt', 
+               '2000_Mbeki.txt', 
+               '2001_Mbeki.txt', 
+               '2002_Mbeki.txt', 
+               '2003_Mbeki.txt', 
+               '2004_post_elections_Mbeki.txt', 
+               '2004_pre_elections_Mbeki.txt', 
+               '2005_Mbeki.txt', 
+               '2006_Mbeki.txt', 
+               '2007_Mbeki.txt', 
+               '2008_Mbeki.txt', 
+               '2009_post_elections_Zuma.txt', 
+               '2009_pre_elections_ Motlanthe.txt', 
+               '2010_Zuma.txt', 
+               '2011_Zuma.txt', 
+               '2012_Zuma.txt', 
+               '2013_Zuma.txt', 
+               '2014_post_elections_Zuma.txt', 
+               '2014_pre_elections_Zuma.txt', 
+               '2015_Zuma.txt', 
+               '2016_Zuma.txt', 
+               '2017_Zuma.txt', 
+               '2018_Ramaphosa.txt', 
+               '2019_post_elections_Ramaphosa.txt', 
+               '2019_pre_elections_Ramaphosa.txt', 
+               '2020_Ramaphosa.txt', 
+               '2021_Ramaphosa.txt', 
+               '2022_Ramaphosa.txt', 
+               '2023_Ramaphosa.txt')
+
+
+this_speech <- c()
+this_speech[1] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/1994_post_elections_Mandela.txt', nchars = 27050)
+this_speech[2] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/1994_pre_elections_deKlerk.txt', nchars = 12786)
+this_speech[3] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/1995_Mandela.txt', nchars = 39019)
+this_speech[4] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/1996_Mandela.txt', nchars = 39524)
+this_speech[5] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/1997_Mandela.txt', nchars = 37489)
+this_speech[6] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/1998_Mandela.txt', nchars = 45247)
+this_speech[7] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/1999_post_elections_Mandela.txt', nchars = 34674)
+this_speech[8] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/1999_pre_elections_Mandela.txt', nchars = 41225)
+this_speech[9] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2000_Mbeki.txt', nchars = 37552)
+this_speech[10] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2001_Mbeki.txt', nchars = 41719)
+this_speech[11] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2002_Mbeki.txt', nchars = 50544)
+this_speech[12] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2003_Mbeki.txt', nchars = 58284)
+this_speech[13] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2004_post_elections_Mbeki.txt', nchars = 34590)
+this_speech[14] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2004_pre_elections_Mbeki.txt', nchars = 39232)
+this_speech[15] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2005_Mbeki.txt', nchars = 54635)
+this_speech[16] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2006_Mbeki.txt', nchars = 48643)
+this_speech[17] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2007_Mbeki.txt', nchars = 48641)
+this_speech[18] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2008_Mbeki.txt', nchars = 44907)
+this_speech[19] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2009_post_elections_Zuma.txt', nchars = 31101)
+this_speech[20] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2009_pre_elections_Motlanthe.txt', nchars = 47157)
+this_speech[21] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2010_Zuma.txt', nchars = 26384)
+this_speech[22] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2011_Zuma.txt', nchars = 33281)
+this_speech[23] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2012_Zuma.txt', nchars = 33376)
+this_speech[24] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2013_Zuma.txt', nchars = 36006)
+this_speech[25] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2014_post_elections_Zuma.txt', nchars = 29403)
+this_speech[26] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2014_pre_elections_Zuma.txt', nchars = 36233)
+this_speech[27] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2015_Zuma.txt', nchars = 32860)
+this_speech[28] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2016_Zuma.txt', nchars = 32464)
+this_speech[29] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2017_Zuma.txt', nchars = 35981)
+this_speech[30] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2018_Ramaphosa.txt', nchars = 33290)
+this_speech[31] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2019_post_elections_Ramaphosa.txt', nchars = 42112)
+this_speech[32] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2019_pre_elections_Ramaphosa.txt', nchars = 56960)
+this_speech[33] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2020_Ramaphosa.txt', nchars = 47910)
+this_speech[34] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2021_Ramaphosa.txt', nchars = 43352)
+this_speech[35] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2022_Ramaphosa.txt', nchars = 52972)
+this_speech[36] <- readChar('https://raw.githubusercontent.com/iandurbach/datasci-fi/master/data/sona/2022_Ramaphosa.txt', nchars = 53933)
+
+
+sona <- data.frame(filename = filenames, speech = this_speech, stringsAsFactors = FALSE)
+
+# extract year and president for each speech
+sona$year <- str_sub(sona$filename, start = 1, end = 4)
+sona$pres <- str_remove_all(str_extract(sona$filename, "[dA-Z].*\\."), "\\.")
+
+# clean the sona dataset by adding the date and removing unnecessary text
+replace_reg <- '(http.*?(\\s|.$))|(www.*?(\\s|.$))|&amp;|&lt;|&gt;|\n%[0-9]'
+
+sona <-sona %>%
+  mutate(speech = lemmatize_strings(stringr::str_replace_all(speech, replace_reg , ' '))
+         ,date = str_sub(speech, start=1, end=30)
+         ,date = str_replace_all(date, "February", "02")
+         ,date = str_replace_all(date, "June", "06")
+         ,date = str_replace_all(date, "Feb", "02")
+         ,date = str_replace_all(date, "May", "05")
+         ,date = str_replace_all(date, "Jun", "06")
+         ,date = str_replace_all(date, "Thursday, ","")
+         ,date = str_replace_all(date, ' ', '-')        
+         ,date = str_replace_all(date, "[A-z]",'')
+         ,date = str_replace_all(date, '-----', '')
+         ,date = str_replace_all(date, '----', '')
+         ,date = str_replace_all(date, '---', '')
+         ,date = str_replace_all(date, '--', '')
+  )
+
+# Convert to tibble
+sona <- as.tibble(sona)
+
+#tokenize into sentences 
+tidy_sona <- sona %>% 
+  mutate(speech = str_replace_all(speech, replace_reg, '')) %>% # remove links etx
+  unnest_tokens(sentences, speech, token = 'sentences') %>%   # tokenize
+  dplyr::select(sentences, pres, date, filename,year)
+
+#tokenize into words 
+tidy_sona.w <- sona %>% 
+  mutate(speech = str_replace_all(speech, replace_reg, '')) %>% # remove links etx
+  unnest_tokens(word, speech, token = 'regex') %>%   # tokenize
+  filter(!word %in% stop_words$word, str_detect(word, '[A-Za-z]')) %>% #remove stop words
+  dplyr::select(pres, date, word)
+
+# removing deKlerk and Motlanthe from the analysis because they made only 1 speech
+#sentences 
+tidy_sona  <- tidy_sona  %>%
+  filter(!pres %in% c('deKlerk', 'Motlanthe')) 
+#words 
+tidy_sona.w  <- tidy_sona.w  %>%
+  filter(!pres %in% c('deKlerk', 'Motlanthe')) 
+
+```
+
+## Introduction
+
+xoxo
+
+## Method 
+
+To achieve the assignment objectives the following methods were implemented.
+
+### Data cleaning and pre-proccesing
+
+Text files containing semi structured speeches by presented by the presidents were read in and placed into dataset. he dataset was read in and it was in a semi structured formart which could not be automatically tabulated.
+
+```{r speeches, echo=FALSE, eval=TRUE}
+# number of speches per president
+table(sona$pres)
+```
+
+
+```{r sentences, echo=FALSE, eval=TRUE}
+# number of sentences per president
+table(tidy_sona$pres)
+```
+
+```{r sent.datasplit, message=FALSE, warning=FALSE, results='hide', echo=FALSE}
+set.seed(2023)
+#splitting sentences into testing and training  
+sent_train<- tidy_sona %>%
+  group_by("pres") %>%
+  slice_sample(prop=0.7)%>%
+  ungroup()%>%
+  dplyr::select(pres,date,sentences)
+
+sent_test <- tidy_sona %>%
+  anti_join(sent_train)%>%
+  dplyr::select(pres,date,sentences)
+
+#separate features into y and x variables
+x_train <- sent_train[3]
+y_train <- sent_train[1]
+
+x_test <- sent_test[3]
+y_test <- sent_test[1]
+
+####CONVERT TARGET INTO CAT ##########
+
+# Create the mapping
+mapping <- c("Ramaphosa" = 0, "Mandela" = 1, "Zuma" = 2, "Mbeki" = 3)
+
+# Apply the mapping to the pres column and convert to categorical. 
+y_train_cat <- y_train %>%
+  mutate(pres = mapping[pres])%>%
+  to_categorical()
+
+y_test_cat <- y_test %>%
+  mutate(pres = mapping[pres])%>%
+  to_categorical()
+
+# convert sentences to sequence 
+sent.to.seq<- function(x,max_features,maxlen){
+  # choose max_features most popular words
+  tokenizer = text_tokenizer(num_words = max_features)
+  fit_text_tokenizer(tokenizer,x$sentences)
+  
+  #convert text to sequence
+  x.seq <- texts_to_sequences(tokenizer,x$sentences)
+
+  # padding 
+  x.seq <- x.seq %>% pad_sequences(maxlen = maxlen) 
+  return(x.seq)
+}
+
+max_features <- 1500
+maxlen <- 70
+x_train.seq <-sent.to.seq(x_train,max_features,maxlen)
+x_test.seq <- sent.to.seq(x_test,max_features,maxlen)
+```
+
+
+
+```{r top500, message=FALSE, warning=FALSE, results='hide', echo=FALSE}
+set.seed(321)
+# select the top 500 words 
+word_bag <- tidy_sona.w %>%
+  group_by(word) %>%
+  count() %>%
+  ungroup() %>%
+  top_n(100, wt = n)
+ 
+#join words with presidents 
+sona.w_tdf <- tidy_sona.w %>%
+  inner_join(word_bag) %>%
+  group_by(pres,date,word) %>%
+  count() %>%  
+  group_by(pres) %>%
+  mutate(total = sum(n)) %>%
+  ungroup()
+
+# show words in a wide format
+bag_of_words <- sona.w_tdf %>% 
+  dplyr::select(pres,date,word,n) %>% 
+  pivot_wider(names_from = word, values_from = n, values_fill = 0) 
+  
+#split testing and training 
+set.seed(321)
+word_train <- bag_of_words %>% 
+  group_by(pres) %>% 
+  slice_sample(prop = 0.7) %>% 
+  ungroup() 
+
+word_test<- bag_of_words %>% 
+  anti_join(word_train) 
+
+#training data sets 
+x_train.w<-word_train%>%
+  dplyr::select(-c(date))
+y_train.w<-word_train%>%
+  dplyr::select(pres)
+#testing data sets 
+x_test.w<-word_test%>%
+  dplyr::select(-c(date,pres))
+y_test.w <-word_test%>%
+  dplyr::select(pres)
+```
+
+
+
+
+Forward-Feed Neural Network 
+
+
+sentences 
+```{r nn, message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(2023)
+nn_model <- keras_model_sequential() %>% 
+  layer_embedding(max_features, output_dim = 10, input_length = maxlen) %>%
+  layer_dropout(0.2) %>%
+  layer_flatten() %>%
+  layer_dense(100, activation = "relu") %>%
+  layer_dense(4, activation = "softmax")
+
+
+nn_model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = optimizer_adam(learning_rate = 0.01),
+  metrics = c('accuracy'),
+)
+
+#impliment early stopping 
+early_stopping <- callback_early_stopping(monitor = "val_loss", patience = 10)
+set.seed(123)
+nn_history <- nn_model %>% 
+  fit(x_train.seq, y_train_cat, 
+      epochs = 30, batch_size = 10, 
+      validation_split = 0.2, shuffle = TRUE,
+      callbacks = list(early_stopping), verbose = 0
+  )
+
+nn_results <- nn_model %>% evaluate(x_test.seq, y_test_cat, batch_size =5, verbose = 0)
+```
+
+
+```{r fig-a, message=FALSE, warning=FALSE, echo=FALSE,fig.cap="Accuracy and loss of the training and validation data sets with early stopping implemented "}
+plot(nn_history)+
+  ggtitle("Forward Neural Networks Model Training")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+no cv 
+
+```{r nn.cv, message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(123)
+nn_history.cv <- nn_model %>% 
+  fit(x_train.seq, y_train_cat, 
+      epochs = 30, batch_size = 10, 
+      shuffle = TRUE, verbose=0
+  )
+
+nn_results.cv <- nn_model %>% evaluate(x_test.seq, y_test_cat, batch_size =5, verbose = 0)
+```
+
+
+```{r fig-b, message=FALSE, warning=FALSE, echo=FALSE,fig.cap=" Forward Neural network Accuracy and loss of the training data set"}
+plot(nn_history.cv)+
+  ggtitle("Forward Neural Networks Model Training Without Validation")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+Convolutional Neural Networks
+
+```{r cnn, message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(123)
+cnn_model <- keras_model_sequential() %>% 
+  layer_embedding(max_features, output_dim = 10, input_length = maxlen) %>%
+  layer_dropout(0.2) %>%
+  layer_conv_1d(filters = 64, kernel_size = 8, activation = "relu") %>%
+  layer_max_pooling_1d(pool_size = 2) %>%
+  layer_flatten() %>%
+  layer_dense(50, activation = "relu") %>%
+  layer_dense(4, activation = "softmax")
+
+
+cnn_model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = optimizer_adam(learning_rate = 0.01),
+  metrics = c('accuracy'),
+)
+set.seed(123)
+cnn_history <- cnn_model %>% 
+  fit(x_train.seq, y_train_cat, 
+      epochs = 30, batch_size = 5, 
+      validation_split = 0.2, shuffle = TRUE,
+      callbacks = list(early_stopping),verbose = 0
+  )
+
+cnn_results <- cnn_model %>% evaluate(x_test.seq, y_test_cat, batch_size = 5, verbose = 0)
+
+```
+
+```{r fig-c, message=FALSE, warning=FALSE, echo=FALSE,fig.cap=" CNN network Accuracy and loss of the training data set"}
+plot(cnn_history)+
+  ggtitle("Convolutional Neural Networks Model Training")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+```{r cnn.cv, message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(123)
+cnn_history.cv <- cnn_model %>% 
+  fit(x_train.seq, y_train_cat, 
+      epochs = 30, batch_size = 5, 
+      shuffle = TRUE,verbose = 0
+  )
+
+cnn_results.cv <- cnn_model %>% evaluate(x_test.seq, y_test_cat, batch_size = 5, verbose = 0)
+
+```
+
+```{r fig-d, message=FALSE, warning=FALSE, echo=FALSE,fig.cap=" Forward Neural network Accuracy and loss of the training data set"}
+plot(cnn_history.cv)+
+  ggtitle("Convolutional Neural Networks Model Training Without Validation")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Classification trees 
+
+```{r clas.t, message=FALSE, warning=FALSE, echo=FALSE}
+
+#fit a classification tree
+fit <- rpart(pres ~ .,x_train.w, method = 'class')
+
+#predict using the training set 
+fittedtrain <- predict(fit, type = 'class')
+predtrain <- table(x_train.w$pres, fittedtrain)
+predtrain
+
+# training accuracy
+round(sum(diag(predtrain))/sum(predtrain), 3) 
+
+# fit model on test data 
+fit.test<-predict(fit,newdata =x_test.w,type="class" )
+predtrain.t <- table(y_test.w$pres, fit.test)
+predtrain.t
+
+
+
+# testing accuracy
+round(sum(diag(predtrain.t))/sum(predtrain.t), 3) 
+
+```
+
+
+
+
+```{r 500 clas.t, message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(321)
+# select the top 500 words 
+word_bag <- tidy_sona.w %>%
+  group_by(word) %>%
+  count() %>%
+  ungroup() %>%
+  top_n(500, wt = n)
+ 
+#join words with presidents 
+sona.w_tdf <- tidy_sona.w %>%
+  inner_join(word_bag) %>%
+  group_by(pres,date,word) %>%
+  count() %>%  
+  group_by(pres) %>%
+  mutate(total = sum(n)) %>%
+  ungroup()
+
+# show words in a wide format
+bag_of_words <- sona.w_tdf %>% 
+  dplyr::select(pres,date,word,n) %>% 
+  pivot_wider(names_from = word, values_from = n, values_fill = 0) 
+  
+#split testing and training 
+set.seed(321)
+word_train <- bag_of_words %>% 
+  group_by(pres) %>% 
+  slice_sample(prop = 0.7) %>% 
+  ungroup() 
+
+word_test<- bag_of_words %>% 
+  anti_join(word_train) 
+
+#training data sets 
+x_train.w<-word_train%>%
+  dplyr::select(-c(date))
+y_train.w<-word_train%>%
+  dplyr::select(pres)
+#testing data sets 
+x_test.w<-word_test%>%
+  dplyr::select(-c(date,pres))
+y_test.w <-word_test%>%
+  dplyr::select(pres)
+#fit a classification tree
+fit <- rpart(pres ~ .,x_train.w, method = 'class')
+
+#predict using the training set 
+fittedtrain <- predict(fit, type = 'class')
+predtrain <- table(x_train.w$pres, fittedtrain)
+predtrain
+
+# training accuracy
+round(sum(diag(predtrain))/sum(predtrain), 3) 
+
+# fit model on test data 
+fit.test<-predict(fit,newdata =x_test.w,type="class" )
+predtrain.t <- table(y_test.w$pres, fit.test)
+predtrain.t
+
+# testing accuracy
+round(sum(diag(predtrain.t))/sum(predtrain.t), 3) 
+
+```
+
+
+
+
+
+## References
